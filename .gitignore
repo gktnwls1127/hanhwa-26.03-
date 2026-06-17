@@ -1,0 +1,11 @@
+Command-*/
+main/cache/
+main/data/
+main/test/
+__pycache__/
+*.pkl
+*.pt
+*.pth
+*.zip
+*.tar
+*.gz
