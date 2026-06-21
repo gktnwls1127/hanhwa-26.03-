@@ -15,7 +15,7 @@ KST = timezone(timedelta(hours=9))
 
 CMD_COLS = ["dataId", "validUntil", "securityLevel", "title", "reportTime", "body", "category"]
 
-# unit.tsv
+# units.tsv
 # columns: unitId, name, unitSize, unitType, combatPower, location, history
 UNIT_COLS = ["UnitID", "name", "unitSize", "unitType", "combatPower", "location", "History"]
 
@@ -104,6 +104,8 @@ def build_units_and_behaviors(
     units_json: Path,
     out_behaviors: Path,
     out_units: Path,
+    # 히스토리 설정
+    history_viewlog_json: Path = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
     cmd_df = load_command_tsv(command_tsv)
@@ -119,8 +121,16 @@ def build_units_and_behaviors(
     all_unit_ids = [str(u.get("unitId", "")).strip() for u in units]
     all_unit_ids = [uid for uid in all_unit_ids if uid]
 
+    # behaviors 생성용
     with viewlog_json.open("r", encoding="utf-8") as f:
         viewlog = json.load(f)
+
+    # history 생성용
+    if history_viewlog_json is None:
+        history_viewlog = viewlog
+    else:
+        with history_viewlog_json.open("r", encoding="utf-8") as f:
+            history_viewlog = json.load(f)
 
     if not isinstance(viewlog, list):
         raise ValueError("viewlog_json은 list[{dataId, unitIds}] 형식이어야 합니다.")
@@ -128,7 +138,11 @@ def build_units_and_behaviors(
     cmd_to_units: Dict[str, Set[str]] = {}
     unit_to_history: Dict[str, List[str]] = {uid: [] for uid in all_unit_ids}
 
-    for row in viewlog:
+    # 원래는 behaviors와 동일한 viewlog로 history 생성
+    # for row in viewlog:
+
+    # 수정 : history_viewlog 사용
+    for row in history_viewlog:
         did = str(row.get("dataId", "")).strip()
         unit_ids = [
             str(x).strip()
@@ -250,7 +264,7 @@ def save_tsv_no_header(df: pd.DataFrame, path: Path) -> None:
 
 def prepare_command_unit_dataset(
     *,
-    out_dir: str = "../Command-Unit",
+    out_dir: str = "../Command-unit",
     command_json: str = "data/unit/command_samples_train_2605.json",
     command_tsv: str = "data/unit/command.tsv",
     viewlog_json: str = "data/unit/unit_command_viewlog_train_2605.json",
@@ -303,7 +317,7 @@ def prepare_command_unit_dataset(
         split_dir = out_dir / split
         split_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(command_tsv, split_dir / "commands.tsv")
-        shutil.copy2(out_units, split_dir / "unit.tsv")
+        shutil.copy2(out_units, split_dir / "units.tsv")
 
     # external val/test 사용
     if use_external_test:
@@ -312,9 +326,20 @@ def prepare_command_unit_dataset(
 
         read_command_json_to_tsv(str(test_command_json), str(test_command_tsv))
 
+        '''
         test_df, _ = build_units_and_behaviors(
             command_tsv=test_command_tsv,
             viewlog_json=test_viewlog_json,
+            units_json=units_json,
+            out_behaviors=test_behaviors_tsv,
+            out_units=out_units,
+        )
+        '''
+
+        test_df, _ = build_units_and_behaviors(
+            command_tsv=test_command_tsv,
+            viewlog_json=test_viewlog_json,          # test behavior
+            history_viewlog_json=viewlog_json,       # train history 사용
             units_json=units_json,
             out_behaviors=test_behaviors_tsv,
             out_units=out_units,
@@ -346,7 +371,7 @@ def prepare_command_unit_dataset(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
 
-    ap.add_argument("--out_dir", default="../Command-Unit")
+    ap.add_argument("--out_dir", default="../Command-unit")
 
     ap.add_argument("--command_json", default="data/unit/command_samples_train_2605.json")
     ap.add_argument("--command_tsv", default="data/unit/command.tsv")

@@ -1,3 +1,4 @@
+from html import parser
 import os
 import argparse
 import sys
@@ -18,7 +19,7 @@ class Config:
         parser.add_argument('--report_encoder', type=str, default='NAML', choices=['CNN', 'MHSA', 'NAML', 'NAML_noTitle', 'NAML_noTime', 'NAML_noBody', 'NAML_noCategory', 'NAML_onlyBody', 'CROWN', 'LIME'], help='Report encoder')
         parser.add_argument('--user_encoder', type=str, default='ATT', choices=['LSTUR', 'MHSA', 'ATT', 'ATT_noPosition', 'CROWN'], help='User encoder')
         # 공유기 추가(26.06)
-        parser.add_argument('--unit_encoder', type=str, default='ATT', choices=['LSTUR', 'MHSA', 'ATT', 'ATT_noPosition', 'CROWN'], help='Unit encoder')
+        parser.add_argument('--unit_encoder', type=str, default='ATT', choices=['ATT', 'ATT_noName', 'ATT_noType', 'ATT_noNameType', 'CROWN'], help='Unit encoder')
         # LIME 추가(26.05)
         parser.add_argument('--content_encoder', type=str, default='CROWN', choices=['CROWN', 'NAML'], help='Base report content encoder used inside LIME')
         
@@ -29,7 +30,7 @@ class Config:
         parser.add_argument('--seed', type=int, default=0, help='Seed for random number generator')
         parser.add_argument('--config_file', type=str, default='', help='Config file path')
         # Dataset config
-        parser.add_argument('--dataset', type=str, default='small', choices=['small', 'large', 'Jan', 'March', 'April', 'May'], help='Dataset type')
+        parser.add_argument('--dataset', type=str, default='small', choices=['small', 'large', 'Jan', 'March', 'April', 'May', 'unit'], help='Dataset type')
         parser.add_argument('--tokenizer', type=str, default='SentencePiece', choices=['Command', 'Mecab', 'SentencePiece', 'NLTK'], help='Sentence tokenizer')
         parser.add_argument('--word_threshold', type=int, default=3, help='Word threshold')
         parser.add_argument('--max_title_length', type=int, default=32, help='Sentence truncate length for title')
@@ -38,7 +39,7 @@ class Config:
         # Training config
         parser.add_argument('--negative_sample_num', type=int, default=4, help='Negative sample number of each positive sample')
         parser.add_argument('--max_history_num', type=int, default=50, help='Maximum number of history reports for each user')
-        parser.add_argument('--epoch', type=int, default=1, help='Training epoch')
+        parser.add_argument('--epoch', type=int, default=10, help='Training epoch')
         parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
         parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
         parser.add_argument('--weight_decay', type=float, default=0, help='Optimizer weight decay')
@@ -82,6 +83,9 @@ class Config:
         parser.add_argument('--user_embedding_dim', type=int, default=50, help='User embedding dimension')
         parser.add_argument('--category_embedding_dim', type=int, default=50, help='Category embedding dimension')
         parser.add_argument('--position_embedding_dim', type=int, default=50, help='Position embedding dimension')
+        # 공유기 추가
+        parser.add_argument('--unit_name_embedding_dim', type=int, default=50)
+        parser.add_argument('--unit_type_embedding_dim', type=int, default=50)
         # CRWON 추가 속성
         parser.add_argument('--intent_embedding_dim', type=int, default=400, choices=[100, 200, 300, 400], help='Intent embedding dimension')
         parser.add_argument('--intent_num', type=int, default=3, choices=[1, 2, 3, 4, 5], help='The number of title/body intent (k)')
@@ -117,7 +121,10 @@ class Config:
         args = parser.parse_args()
 
         # 공유기(unit) 모드 여부(26.06)
-        self.unit_eval = '--unit_encoder' in sys.argv
+        self.unit_eval = (
+            args.dataset == 'unit'
+            or any(arg == '--unit_encoder' or arg.startswith('--unit_encoder=') for arg in sys.argv)
+        )
 
         self.attribute_dict = dict(vars(args))
         self.attribute_dict['unit_eval'] = self.unit_eval
@@ -131,9 +138,9 @@ class Config:
             self.test_root = '../Command-%s/time/test' % self.dataset
         # 공유기 추가(26.06)
         elif self.unit_eval:
-            self.train_root = '../Command-%s-Unit/train' % self.dataset
-            self.dev_root   = '../Command-%s-Unit/dev' % self.dataset
-            self.test_root  = '../Command-%s-Unit/test' % self.dataset
+            self.train_root = '../Command-%s/train' % self.dataset
+            self.dev_root   = '../Command-%s/dev' % self.dataset
+            self.test_root  = '../Command-%s/test' % self.dataset
         else:
             self.train_root = '../Command-%s/train' % self.dataset
             self.dev_root   = '../Command-%s/dev' % self.dataset
@@ -180,7 +187,7 @@ class Config:
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True # For reproducibility (https://pytorch.org/docs/stable/notes/randomness.html)
+        torch.backends.cudnn.deterministic = True
         if self.gpu_available:
             torch.cuda.set_device(self.device_id)
             torch.cuda.manual_seed(self.seed)
@@ -189,24 +196,39 @@ class Config:
 
 
     def preliminary_setup(self):
-        dataset_files = [
-            os.path.join(self.train_root, 'users.tsv'),
-            os.path.join(self.train_root, 'commands.tsv'),
-            os.path.join(self.train_root, 'behaviors.tsv'),
-            os.path.join(self.dev_root, 'users.tsv'),
-            os.path.join(self.dev_root, 'commands.tsv'),
-            os.path.join(self.dev_root, 'behaviors.tsv'),
-            os.path.join(self.test_root, 'users.tsv'),
-            os.path.join(self.test_root, 'commands.tsv'),
-            os.path.join(self.test_root, 'behaviors.tsv'),
-        ]
+        # 공유기 추가
+        if self.unit_eval:
+            dataset_files = [
+                os.path.join(self.train_root, 'units.tsv'),
+                os.path.join(self.train_root, 'commands.tsv'),
+                os.path.join(self.train_root, 'behaviors.tsv'),
+                os.path.join(self.dev_root, 'units.tsv'),
+                os.path.join(self.dev_root, 'commands.tsv'),
+                os.path.join(self.dev_root, 'behaviors.tsv'),
+                os.path.join(self.test_root, 'units.tsv'),
+                os.path.join(self.test_root, 'commands.tsv'),
+                os.path.join(self.test_root, 'behaviors.tsv'),
+            ]
+        else:
+            dataset_files = [
+                os.path.join(self.train_root, 'users.tsv'),
+                os.path.join(self.train_root, 'commands.tsv'),
+                os.path.join(self.train_root, 'behaviors.tsv'),
+                os.path.join(self.dev_root, 'users.tsv'),
+                os.path.join(self.dev_root, 'commands.tsv'),
+                os.path.join(self.dev_root, 'behaviors.tsv'),
+                os.path.join(self.test_root, 'users.tsv'),
+                os.path.join(self.test_root, 'commands.tsv'),
+                os.path.join(self.test_root, 'behaviors.tsv'),
+            ]
+        
         if not all(list(map(os.path.exists, dataset_files))):
             # 시간별 테스트 추가
             if self.time_eval:
                 prepare_command_time_dataset(out_dir='../Command-%s/time' % self.dataset)
             # 공유기 추가(26.06)
             elif self.unit_eval:
-                prepare_command_unit_dataset(out_dir='../Command-%s-Unit' % self.dataset)
+                prepare_command_unit_dataset(out_dir='../Command-%s' % self.dataset)
             else:
                 prepare_command_dataset(out_dir='../Command-%s' % self.dataset)
 

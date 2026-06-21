@@ -6,6 +6,8 @@ import time
 from config import Config
 from Command_corpus import Command_Corpus
 from Command_dataset import Command_Train_Dataset
+# 공유기 추가(26.06)
+from Command_unitDataset import Command_Unit_Train_Dataset
 from util import AvgMetric
 from util import compute_scores
 from tqdm import tqdm
@@ -29,7 +31,10 @@ class Trainer:
         self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=config.lr, weight_decay=config.weight_decay)
         self._dataset = config.dataset
         self.command_corpus = command_corpus
-        self.train_dataset = Command_Train_Dataset(command_corpus, config)
+        if config.unit_eval:
+            self.train_dataset = Command_Unit_Train_Dataset(command_corpus, config)
+        else:
+            self.train_dataset = Command_Train_Dataset(command_corpus, config)
         self.run_index = run_index
         self.model_dir = config.model_dir + '/#' + str(self.run_index)
         self.best_model_dir = config.best_model_dir + '/#' + str(self.run_index)
@@ -96,9 +101,43 @@ class Trainer:
             if self.config.gpu_available:
                 torch.cuda.synchronize()
             train_start = time.perf_counter()
+            '''
             for (cmd_title_text, cmd_title_mask, cmd_content_text, cmd_content_mask, cmd_time_text, cmd_time_mask, cmd_category, \
                     cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit, cand_title_text, cand_title_mask, cand_content_text, cand_content_mask, cand_time_text, cand_time_mask, \
                         cand_hist_category, cand_hist_mask, cand_hist_graph, cand_cat_mask, cand_cat_idx, pos_index) in tqdm(train_dataloader, desc=f"Epoch {e} train"):
+            '''
+            # 공유기 추가 (26.06) - unit_eval 모드일 때와 아닐 때를 구분하여 배치 unpack
+            for batch in tqdm(train_dataloader, desc=f"Epoch {e} train"):
+                if getattr(self.config, "unit_eval", False):
+                    (
+                        cmd_title_text, cmd_title_mask,
+                        cmd_content_text, cmd_content_mask,
+                        cmd_time_text, cmd_time_mask,
+                        cmd_category,
+                        cand_unit_ID, cand_unit_name, cand_unit_size, cand_unit_type, cand_combat_power, cand_location,
+                        cand_title_text, cand_title_mask,
+                        cand_content_text, cand_content_mask,
+                        cand_time_text, cand_time_mask,
+                        cand_hist_category, cand_hist_mask,
+                        cand_hist_graph, cand_cat_mask, cand_cat_idx,
+                        pos_index
+                    ) = batch
+                else:
+                    (
+                        cmd_title_text, cmd_title_mask,
+                        cmd_content_text, cmd_content_mask,
+                        cmd_time_text, cmd_time_mask,
+                        cmd_category,
+                        cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
+                        cand_title_text, cand_title_mask,
+                        cand_content_text, cand_content_mask,
+                        cand_time_text, cand_time_mask,
+                        cand_hist_category, cand_hist_mask,
+                        cand_hist_graph, cand_cat_mask, cand_cat_idx,
+                        pos_index
+                    ) = batch
+            
+            
                 if self.config.gpu_available:
                     cmd_title_text   = cmd_title_text.cuda(non_blocking=True)
                     cmd_title_mask   = cmd_title_mask.cuda(non_blocking=True)
@@ -108,11 +147,19 @@ class Trainer:
                     cmd_time_mask    = cmd_time_mask.cuda(non_blocking=True)
                     cmd_category     = cmd_category.cuda(non_blocking=True)
 
-                    cand_user_ID = cand_user_ID.cuda(non_blocking=True)
-                    cand_dept    = cand_dept.cuda(non_blocking=True)
-                    cand_pos     = cand_pos.cuda(non_blocking=True)
-                    cand_rank    = cand_rank.cuda(non_blocking=True)
-                    cand_unit    = cand_unit.cuda(non_blocking=True)
+                    if getattr(self.config, "unit_eval", False):
+                        cand_unit_ID = cand_unit_ID.cuda(non_blocking=True)
+                        cand_unit_name = cand_unit_name.cuda(non_blocking=True)
+                        cand_unit_size = cand_unit_size.cuda(non_blocking=True)
+                        cand_unit_type = cand_unit_type.cuda(non_blocking=True)
+                        cand_combat_power = cand_combat_power.cuda(non_blocking=True)
+                        cand_location = cand_location.cuda(non_blocking=True)
+                    else:
+                        cand_user_ID = cand_user_ID.cuda(non_blocking=True)
+                        cand_dept = cand_dept.cuda(non_blocking=True)
+                        cand_pos = cand_pos.cuda(non_blocking=True)
+                        cand_rank = cand_rank.cuda(non_blocking=True)
+                        cand_unit = cand_unit.cuda(non_blocking=True)
 
                     cand_title_text   = cand_title_text.cuda(non_blocking=True)
                     cand_title_mask   = cand_title_mask.cuda(non_blocking=True)
@@ -129,17 +176,59 @@ class Trainer:
                     if cand_cat_mask is not None:   cand_cat_mask   = cand_cat_mask.cuda(non_blocking=True)
                     if cand_cat_idx is not None:    cand_cat_idx    = cand_cat_idx.cuda(non_blocking=True)
 
+                '''
                 logits = model(cmd_title_text, cmd_title_mask, cmd_content_text, cmd_content_mask, cmd_time_text, cmd_time_mask, cmd_category,
                                 cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit, cand_title_text, cand_title_mask, cand_content_text, cand_content_mask, cand_time_text, cand_time_mask, cand_hist_category, cand_hist_mask, cand_hist_graph, cand_cat_mask, cand_cat_idx)
-                
+                '''
+                # 공유기 추가(26.06) - unit_eval 모드일 때와 아닐 때를 구분하여 모델에 입력
+                if getattr(self.config, "unit_eval", False):
+                    logits = model(
+                        cmd_title_text, cmd_title_mask,
+                        cmd_content_text, cmd_content_mask,
+                        cmd_time_text, cmd_time_mask,
+                        cmd_category,
+
+                        cand_unit_ID, cand_unit_name,
+                        cand_unit_size, cand_unit_type,
+                        cand_combat_power, cand_location,
+
+                        cand_title_text, cand_title_mask,
+                        cand_content_text, cand_content_mask,
+                        cand_time_text, cand_time_mask,
+                        cand_hist_category, cand_hist_mask,
+                        cand_hist_graph, cand_cat_mask, cand_cat_idx
+                    )
+                    batch_size_now = cand_unit_ID.size(0)
+                else:
+                    logits = model(
+                        cmd_title_text, cmd_title_mask,
+                        cmd_content_text, cmd_content_mask,
+                        cmd_time_text, cmd_time_mask,
+                        cmd_category,
+
+                        cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
+
+                        cand_title_text, cand_title_mask,
+                        cand_content_text, cand_content_mask,
+                        cand_time_text, cand_time_mask,
+                        cand_hist_category, cand_hist_mask,
+                        cand_hist_graph, cand_cat_mask, cand_cat_idx
+                    )
+                    batch_size_now = cand_user_ID.size(0)
+
                 loss = self.loss(logits)
                 if model.report_encoder.auxiliary_loss is not None:
                     report_auxiliary_loss = model.report_encoder.auxiliary_loss.mean()
                     loss += report_auxiliary_loss
-                if model.user_encoder.auxiliary_loss is not None:
-                    user_encoder_auxiliary_loss = model.user_encoder.auxiliary_loss.mean()
-                    loss += user_encoder_auxiliary_loss
-                epoch_loss += float(loss) * cand_user_ID.size(0)
+                # 공유기 추가(26.06)
+                if getattr(self.config, "unit_eval", False):
+                    if model.unit_encoder.auxiliary_loss is not None:
+                        loss += model.unit_encoder.auxiliary_loss.mean()
+                else:
+                    if model.user_encoder.auxiliary_loss is not None:
+                        loss += model.user_encoder.auxiliary_loss.mean()
+
+                epoch_loss += float(loss) * batch_size_now
                 self.optimizer.zero_grad()
                 loss.backward()
                 if self.gradient_clip_norm > 0:
@@ -327,7 +416,11 @@ def distributed_train(rank, model: nn.Module, config: Config, command_corpus: Co
     )
     gradient_clip_norm = config.gradient_clip_norm
 
-    train_dataset = Command_Train_Dataset(command_corpus, config)
+    # 공유기 추가(26.06) - unit_eval 모드일 때와 아닐 때를 구분하여 데이터셋 생성
+    if getattr(config, "unit_eval", False):
+        train_dataset = Command_Unit_Train_Dataset(command_corpus, config)
+    else:
+        train_dataset = Command_Train_Dataset(command_corpus, config)
 
     # rank0만 디렉토리/로그 담당
     if rank == 0:
@@ -383,72 +476,133 @@ def distributed_train(rank, model: nn.Module, config: Config, command_corpus: Co
         model.train()
         epoch_loss = 0.0
 
-        # Command_Train_Dataset 반환값(= 단일 GPU train 루프와 동일)으로 unpack
-        for (cmd_title_text, cmd_title_mask, cmd_content_text, cmd_content_mask, cmd_time_text, cmd_time_mask, cmd_category,
-             cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
-             cand_title_text, cand_title_mask, cand_content_text, cand_content_mask, cand_time_text, cand_time_mask,
-             cand_hist_category, cand_hist_mask, cand_hist_graph, cand_cat_mask, cand_cat_idx,
-             pos_index) in train_dataloader:
+        for batch in train_dataloader:
+            if getattr(config, "unit_eval", False):
+                (
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
 
-            # to cuda
-            cmd_title_text   = cmd_title_text.cuda(non_blocking=True)
-            cmd_title_mask   = cmd_title_mask.cuda(non_blocking=True)
+                    cand_unit_ID, cand_unit_name,
+                    cand_unit_size, cand_unit_type,
+                    cand_combat_power, cand_location,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx,
+
+                    pos_index
+                ) = batch
+            else:
+                (
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
+
+                    cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx,
+
+                    pos_index
+                ) = batch
+
+            cmd_title_text = cmd_title_text.cuda(non_blocking=True)
+            cmd_title_mask = cmd_title_mask.cuda(non_blocking=True)
             cmd_content_text = cmd_content_text.cuda(non_blocking=True)
             cmd_content_mask = cmd_content_mask.cuda(non_blocking=True)
-            cmd_time_text    = cmd_time_text.cuda(non_blocking=True)
-            cmd_time_mask    = cmd_time_mask.cuda(non_blocking=True)
-            cmd_category     = cmd_category.cuda(non_blocking=True)
+            cmd_time_text = cmd_time_text.cuda(non_blocking=True)
+            cmd_time_mask = cmd_time_mask.cuda(non_blocking=True)
+            cmd_category = cmd_category.cuda(non_blocking=True)
 
-            cand_user_ID = cand_user_ID.cuda(non_blocking=True)
-            cand_dept    = cand_dept.cuda(non_blocking=True)
-            cand_pos     = cand_pos.cuda(non_blocking=True)
-            cand_rank    = cand_rank.cuda(non_blocking=True)
-            cand_unit    = cand_unit.cuda(non_blocking=True)
+            if getattr(config, "unit_eval", False):
+                cand_unit_ID = cand_unit_ID.cuda(non_blocking=True)
+                cand_unit_name = cand_unit_name.cuda(non_blocking=True)
+                cand_unit_size = cand_unit_size.cuda(non_blocking=True)
+                cand_unit_type = cand_unit_type.cuda(non_blocking=True)
+                cand_combat_power = cand_combat_power.cuda(non_blocking=True)
+                cand_location = cand_location.cuda(non_blocking=True)
+            else:
+                cand_user_ID = cand_user_ID.cuda(non_blocking=True)
+                cand_dept = cand_dept.cuda(non_blocking=True)
+                cand_pos = cand_pos.cuda(non_blocking=True)
+                cand_rank = cand_rank.cuda(non_blocking=True)
+                cand_unit = cand_unit.cuda(non_blocking=True)
 
-            cand_title_text   = cand_title_text.cuda(non_blocking=True)
-            cand_title_mask   = cand_title_mask.cuda(non_blocking=True)
+            cand_title_text = cand_title_text.cuda(non_blocking=True)
+            cand_title_mask = cand_title_mask.cuda(non_blocking=True)
             cand_content_text = cand_content_text.cuda(non_blocking=True)
             cand_content_mask = cand_content_mask.cuda(non_blocking=True)
-            cand_time_text    = cand_time_text.cuda(non_blocking=True)
-            cand_time_mask    = cand_time_mask.cuda(non_blocking=True)
-
+            cand_time_text = cand_time_text.cuda(non_blocking=True)
+            cand_time_mask = cand_time_mask.cuda(non_blocking=True)
             cand_hist_category = cand_hist_category.cuda(non_blocking=True)
-            cand_hist_mask     = cand_hist_mask.cuda(non_blocking=True)
-
-            # graph류는 항상 텐서로 들어오는 전제(네 Dataset 구현 기준)라 그냥 cuda 처리
+            cand_hist_mask = cand_hist_mask.cuda(non_blocking=True)
             cand_hist_graph = cand_hist_graph.cuda(non_blocking=True)
-            cand_cat_mask   = cand_cat_mask.cuda(non_blocking=True)
-            cand_cat_idx    = cand_cat_idx.cuda(non_blocking=True)
+            cand_cat_mask = cand_cat_mask.cuda(non_blocking=True)
+            cand_cat_idx = cand_cat_idx.cuda(non_blocking=True)
 
-            # forward 인자 수/순서를 단일 GPU와 동일하게 맞춤 (pos_index는 모델에 전달 X)
-            logits = model(
-                cmd_title_text, cmd_title_mask,
-                cmd_content_text, cmd_content_mask,
-                cmd_time_text, cmd_time_mask,
-                cmd_category,
+            if getattr(config, "unit_eval", False):
+                logits = model(
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
 
-                cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
-                cand_title_text, cand_title_mask,
-                cand_content_text, cand_content_mask,
-                cand_time_text, cand_time_mask,
-                cand_hist_category, cand_hist_mask,
-                cand_hist_graph, cand_cat_mask, cand_cat_idx
-            )  # [B, 1+neg]
+                    cand_unit_ID, cand_unit_name,
+                    cand_unit_size, cand_unit_type,
+                    cand_combat_power, cand_location,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx
+                )
+                batch_size_now = cand_unit_ID.size(0)
+            else:
+                logits = model(
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
+
+                    cand_user_ID, cand_dept, cand_pos, cand_rank, cand_unit,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx
+                )
+                batch_size_now = cand_user_ID.size(0)
 
             loss = loss_fn(logits)
 
-            # auxiliary loss
             if getattr(model.module.report_encoder, "auxiliary_loss", None) is not None:
-                loss = loss + model.module.report_encoder.auxiliary_loss.mean()
-            if getattr(model.module.user_encoder, "auxiliary_loss", None) is not None:
-                loss = loss + model.module.user_encoder.auxiliary_loss.mean()
+                loss += model.module.report_encoder.auxiliary_loss.mean()
 
-            epoch_loss += float(loss) * cand_user_ID.size(0)
+            if getattr(config, "unit_eval", False):
+                if getattr(model.module.unit_encoder, "auxiliary_loss", None) is not None:
+                    loss += model.module.unit_encoder.auxiliary_loss.mean()
+            else:
+                if getattr(model.module.user_encoder, "auxiliary_loss", None) is not None:
+                    loss += model.module.user_encoder.auxiliary_loss.mean()
+
+            epoch_loss += float(loss) * batch_size_now
 
             optimizer.zero_grad()
             loss.backward()
+
             if gradient_clip_norm > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+
             optimizer.step()
             
         dist.barrier()

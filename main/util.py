@@ -5,6 +5,7 @@ import numpy as np
 import json
 from Command_corpus import Command_Corpus
 from Command_dataset import Command_DevTest_Dataset
+from Command_unitDataset import Command_Unit_DevTest_Dataset
 from torch.utils.data import DataLoader
 from evaluate import scoring
 from torch import Tensor
@@ -96,8 +97,14 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
         truth_sizes.append(len(json.loads(labels_json)))
 
     # DataLoader: shuffle=False 중요 (behaviors.tsv 순서 유지)
+    # 공유기 추가(26.06)
+    if getattr(config, "unit_eval", False):
+        dataset = Command_Unit_DevTest_Dataset(command_corpus, config, mode)
+    else:
+        dataset = Command_DevTest_Dataset(command_corpus, config, mode)
+
     dataloader = DataLoader(
-        Command_DevTest_Dataset(command_corpus, config, mode),
+        dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
@@ -105,7 +112,7 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
     )
 
     sub_scores = [[] for _ in range(impression_num)]
-    cand_users = [None for _ in range(impression_num)]
+    cand_targets = [None for _ in range(impression_num)]
     seen_impressions = 0
 
     if config.gpu_available:
@@ -114,52 +121,100 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
     model.eval()
     with torch.no_grad():
         for batch in dataloader:
-            (user_idx, user_dept, user_pos, user_rank, user_unit,
-             cand_title_text, cand_title_mask,
-             cand_content_text, cand_content_mask,
-             cand_time_text, cand_time_mask,
-             cand_hist_category, cand_hist_mask,
-             cand_hist_graph, cand_cat_mask, cand_cat_idx,
-             cmd_title_text, cmd_title_mask,
-             cmd_content_text, cmd_content_mask,
-             cmd_time_text, cmd_time_mask,
-             cmd_category,
-             sample_idx) = batch  # ★ 여기 sample_idx를 사용해서 impression 매핑
+            # 공유기 추가(26.06)
+            if getattr(config, "unit_eval", False):
+                (
+                    unit_idx, unit_name, unit_size, unit_type, combat_power, location,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask, cand_hist_graph,
+                    cand_cat_mask, cand_cat_idx,
+
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category, sample_idx
+                ) = batch
+            else:
+                (
+                    user_idx, user_dept, user_pos, user_rank, user_unit,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category,
+                    cand_hist_mask, cand_hist_graph,
+                    cand_cat_mask, cand_cat_idx,
+
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category, sample_idx
+                ) = batch
 
             # 허용 형태:
             # - user_idx: [B]  -> [B,1]로만 보정
             # - user_idx: [B,1] or [B,K] -> 그대로 사용
-            if user_idx.dim() == 1:
-                # 배치에 impression이 1개인데 후보가 텐서로 안 묶인 특이 케이스 방어용
-                user_idx  = user_idx.unsqueeze(1)
-                user_dept = user_dept.unsqueeze(1)
-                user_pos  = user_pos.unsqueeze(1)
-                user_rank = user_rank.unsqueeze(1)
-                user_unit = user_unit.unsqueeze(1)
+            # 공유기 추가(26.06)
+            target_idx = unit_idx if getattr(config, "unit_eval", False) else user_idx
 
-                cand_title_text   = cand_title_text.unsqueeze(1)
-                cand_title_mask   = cand_title_mask.unsqueeze(1)
+            if target_idx.dim() == 1:
+                if getattr(config, "unit_eval", False):
+                    unit_idx = unit_idx.unsqueeze(1)
+                    unit_name = unit_name.unsqueeze(1)
+                    unit_size = unit_size.unsqueeze(1)
+                    unit_type = unit_type.unsqueeze(1)
+                    combat_power = combat_power.unsqueeze(1)
+                    location = location.unsqueeze(1)
+                    target_idx = unit_idx
+                else:
+                    user_idx = user_idx.unsqueeze(1)
+                    user_dept = user_dept.unsqueeze(1)
+                    user_pos = user_pos.unsqueeze(1)
+                    user_rank = user_rank.unsqueeze(1)
+                    user_unit = user_unit.unsqueeze(1)
+                    target_idx = user_idx
+
+                cand_title_text = cand_title_text.unsqueeze(1)
+                cand_title_mask = cand_title_mask.unsqueeze(1)
                 cand_content_text = cand_content_text.unsqueeze(1)
                 cand_content_mask = cand_content_mask.unsqueeze(1)
-                cand_time_text    = cand_time_text.unsqueeze(1)
-                cand_time_mask    = cand_time_mask.unsqueeze(1)
+                cand_time_text = cand_time_text.unsqueeze(1)
+                cand_time_mask = cand_time_mask.unsqueeze(1)
                 cand_hist_category = cand_hist_category.unsqueeze(1)
-                cand_hist_mask     = cand_hist_mask.unsqueeze(1)
-                if cand_hist_graph is not None: cand_hist_graph = cand_hist_graph.unsqueeze(1)
-                if cand_cat_mask  is not None:  cand_cat_mask  = cand_cat_mask.unsqueeze(1)
-                if cand_cat_idx   is not None:  cand_cat_idx   = cand_cat_idx.unsqueeze(1)
-            elif user_idx.dim() == 2:
-                # [B,1]도 OK, [B,K]도 OK
+                cand_hist_mask = cand_hist_mask.unsqueeze(1)
+
+                if cand_hist_graph is not None:
+                    cand_hist_graph = cand_hist_graph.unsqueeze(1)
+                if cand_cat_mask is not None:
+                    cand_cat_mask = cand_cat_mask.unsqueeze(1)
+                if cand_cat_idx is not None:
+                    cand_cat_idx = cand_cat_idx.unsqueeze(1)
+
+            elif target_idx.dim() == 2:
                 pass
             else:
-                raise RuntimeError(f"[compute_scores] unexpected user_idx dim={user_idx.dim()} shape={tuple(user_idx.shape)}")
+                raise RuntimeError(
+                    f"[compute_scores] unexpected target_idx dim={target_idx.dim()} shape={tuple(target_idx.shape)}"
+                )
 
             if config.gpu_available:
-                user_idx = user_idx.cuda(non_blocking=True)
-                user_dept = user_dept.cuda(non_blocking=True)
-                user_pos = user_pos.cuda(non_blocking=True)
-                user_rank = user_rank.cuda(non_blocking=True)
-                user_unit = user_unit.cuda(non_blocking=True)
+                # 공유기 추가(26.06)
+                if getattr(config, "unit_eval", False):
+                    unit_idx = unit_idx.cuda(non_blocking=True)
+                    unit_name = unit_name.cuda(non_blocking=True)
+                    unit_size = unit_size.cuda(non_blocking=True)
+                    unit_type = unit_type.cuda(non_blocking=True)
+                    combat_power = combat_power.cuda(non_blocking=True)
+                    location = location.cuda(non_blocking=True)
+                else:
+                    user_idx = user_idx.cuda(non_blocking=True)
+                    user_dept = user_dept.cuda(non_blocking=True)
+                    user_pos = user_pos.cuda(non_blocking=True)
+                    user_rank = user_rank.cuda(non_blocking=True)
+                    user_unit = user_unit.cuda(non_blocking=True)
 
                 cand_title_text = cand_title_text.cuda(non_blocking=True)
                 cand_title_mask = cand_title_mask.cuda(non_blocking=True)
@@ -186,18 +241,37 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
                 sample_idx = sample_idx.cuda(non_blocking=True) if torch.is_tensor(sample_idx) else sample_idx
 
             # forward -> [B,K] (impression-level) 또는 [B,1] (구형 pair) 모두 허용
-            batch_scores = model(
-                cmd_title_text, cmd_title_mask,
-                cmd_content_text, cmd_content_mask,
-                cmd_time_text, cmd_time_mask,
-                cmd_category,
-                user_idx, user_dept, user_pos, user_rank, user_unit,
-                cand_title_text, cand_title_mask,
-                cand_content_text, cand_content_mask,
-                cand_time_text, cand_time_mask,
-                cand_hist_category, cand_hist_mask,
-                cand_hist_graph, cand_cat_mask, cand_cat_idx
-            )
+            # 공유기 추가(26.06)
+            if getattr(config, "unit_eval", False):
+                batch_scores = model(
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
+
+                    unit_idx, unit_name, unit_size, unit_type, combat_power, location,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx
+                )
+            else:
+                batch_scores = model(
+                    cmd_title_text, cmd_title_mask,
+                    cmd_content_text, cmd_content_mask,
+                    cmd_time_text, cmd_time_mask,
+                    cmd_category,
+
+                    user_idx, user_dept, user_pos, user_rank, user_unit,
+
+                    cand_title_text, cand_title_mask,
+                    cand_content_text, cand_content_mask,
+                    cand_time_text, cand_time_mask,
+                    cand_hist_category, cand_hist_mask,
+                    cand_hist_graph, cand_cat_mask, cand_cat_idx
+                )
 
             if torch.is_tensor(sample_idx):
                 imp_ids = sample_idx.detach().cpu().numpy().reshape(-1)
@@ -213,9 +287,14 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
             else:
                 raise RuntimeError(f"[compute_scores] unexpected batch_scores shape: {scores_np.shape}")
 
-            user_idx_np = user_idx.detach().cpu().numpy()
-            if user_idx_np.ndim == 1:
-                user_idx_np = user_idx_np.reshape(-1, 1)
+            # 공유기 추가(26.06)
+            if getattr(config, "unit_eval", False):
+                target_idx_np = unit_idx.detach().cpu().numpy()
+            else:
+                target_idx_np = user_idx.detach().cpu().numpy()
+
+            if target_idx_np.ndim == 1:
+                target_idx_np = target_idx_np.reshape(-1, 1)
 
             B = scores_np.shape[0]
             if imp_ids.shape[0] != B:
@@ -229,7 +308,7 @@ def compute_scores(model: nn.Module, command_corpus: Command_Corpus, config, bat
                     )
 
                 row = scores_np[i].reshape(-1)  # K
-                cand_users[imp_idx] = user_idx_np[i].reshape(-1).tolist()  # <-- 핵심: None 방지
+                cand_targets[imp_idx] = target_idx_np[i].reshape(-1).tolist()  # <-- 핵심: None 방지
 
                 # 후보 순서(원래 포지션) 보존: [score, original_position]
                 sub_scores[imp_idx] = [[float(s), j] for j, s in enumerate(row)]

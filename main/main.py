@@ -5,13 +5,14 @@ import shutil
 from config import Config
 import torch
 from Command_corpus import Command_Corpus
+from Command_unitCorpus import Command_unitCorpus
 from model import Model
 from trainer import Trainer, distributed_train
 from util import compute_scores, get_run_index
 import torch.multiprocessing as mp
 
 
-def train(config: Config, command_corpus: Command_Corpus):
+def train(config: Config, command_corpus):
     model = Model(config)
     model.initialize()
     run_index = get_run_index(config.result_dir)
@@ -36,7 +37,7 @@ def train(config: Config, command_corpus: Command_Corpus):
         torch.cuda.empty_cache()
 
 
-def dev(config: Config, command_corpus: Command_Corpus):
+def dev(config: Config, command_corpus):
     model = Model(config)
     assert os.path.exists(config.dev_model_path), 'Dev model does not exist : ' + config.dev_model_path
     model.load_state_dict(torch.load(config.dev_model_path, map_location=torch.device('cpu'))[model.model_name])
@@ -51,7 +52,7 @@ def dev(config: Config, command_corpus: Command_Corpus):
     return auc, mrr, ndcg5, ndcg10
 
 
-def test(config: Config, command_corpus: Command_Corpus):
+def test(config: Config, command_corpus):
     if config.gpu_available:
         torch.cuda.synchronize()
     t0 = time.perf_counter()
@@ -119,6 +120,10 @@ def format_mmss(seconds: float) -> str:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
+def build_corpus(config: Config):
+    if getattr(config, "unit_eval", False):
+        return Command_unitCorpus(config)
+    return Command_Corpus(config)
 
 if __name__ == '__main__':
     config = Config()
@@ -131,7 +136,7 @@ if __name__ == '__main__':
             config.dev_root   = '../Command-%s/time/test' % config.dataset
             config.test_root  = '../Command-%s/time/test' % config.dataset
 
-            command_corpus = Command_Corpus(config)
+            command_corpus = build_corpus(config)
             train(config, command_corpus)
             config.test_model_path = (config.best_model_dir + '/#' +str(config.run_index) + '/' + config.report_encoder + '-' + config.user_encoder)
             test(config, command_corpus)
@@ -142,14 +147,21 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
 
     else:
-        command_corpus = Command_Corpus(config)
+        command_corpus = build_corpus(config)
         if config.mode == 'train':
             train(config, command_corpus)
+           
+            # 공유기 추가(26.06)
+            if getattr(config, "unit_eval", False):
+                target_encoder = config.unit_encoder
+            else:
+                target_encoder = config.user_encoder
+
             # LIME 추가(26.05)
             if config.report_encoder == 'LIME':
-                model_name = config.report_encoder + '-' + config.content_encoder + '-' + config.user_encoder
+                model_name = config.report_encoder + '-' + config.content_encoder + '-' + target_encoder
             else:
-                model_name = config.report_encoder + '-' + config.user_encoder
+                model_name = config.report_encoder + '-' + target_encoder
 
             config.test_model_path = config.best_model_dir + '/#' + str(config.run_index) + '/' + model_name
             #config.test_model_path = config.best_model_dir + '/#' + str(config.run_index) + '/' + config.report_encoder + '-' + config.user_encoder

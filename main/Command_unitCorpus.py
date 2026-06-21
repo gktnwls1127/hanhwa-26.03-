@@ -208,13 +208,13 @@ class Command_unitCorpus:
         vocabulary_file = os.path.join(cache_dir, 'vocabulary-' + str(config.word_threshold) + '-' + config.tokenizer + '-' + str(config.max_title_length) + '-' + str(config.max_content_length) + '-' + str(config.max_time_length) + '-' + cache_dataset + '.json')
         word_embedding_file = os.path.join(cache_dir, 'word_embedding-' + str(config.word_threshold) + '-' + str(config.word_embedding_dim) + '-' + config.tokenizer + '-' + str(config.max_title_length) + '-' + str(config.max_content_length) + '-' + str(config.max_time_length) + '-' + cache_dataset + '.pkl')
         unit_history_graph_file = os.path.join(cache_dir, 'unit_history_graph-' + str(config.max_history_num) + ('' if config.no_self_connection else '-self') + ('' if config.no_adjacent_normalization else '-normalize-' + config.gcn_normalization_type) + '-' + cache_dataset + '.pkl')
-
+        unit_name_file = os.path.join(cache_dir, 'unit_name-%s.json' % cache_dataset)
         unit_size_file = os.path.join(cache_dir, 'unit_size-%s.json' % cache_dataset)
         unit_type_file = os.path.join(cache_dir, 'unit_type-%s.json' % cache_dataset)
         combat_power_file = os.path.join(cache_dir, 'combat_power-%s.json' % cache_dataset)
         location_file = os.path.join(cache_dir, 'location-%s.json' % cache_dataset)
 
-        preprocessed_data_files = [unit_ID_file, report_ID_file, category_file, vocabulary_file, word_embedding_file, unit_history_graph_file, unit_size_file, unit_type_file, combat_power_file, location_file]
+        preprocessed_data_files = [unit_ID_file, report_ID_file, category_file, vocabulary_file, word_embedding_file, unit_history_graph_file, unit_name_file, unit_size_file, unit_type_file, combat_power_file, location_file]
 
         if not all(list(map(os.path.exists, preprocessed_data_files))):
             unit_ID_dict = {'<UNK>': 0}
@@ -224,6 +224,7 @@ class Command_unitCorpus:
             word_counter = collections.Counter()
             report_category_dict = {}
 
+            unit_name_dict = {'<UNK>': 0}
             unit_size_dict = {'<UNK>': 0}
             unit_type_dict = {'<UNK>': 0}
             combat_power_dict = {'<UNK>': 0}
@@ -231,7 +232,7 @@ class Command_unitCorpus:
 
             # 1. unit ID dictionay
             for prefix in [config.train_root, config.dev_root, config.test_root]:
-                units = Command_unitCorpus._load_units(os.path.join(prefix, 'unit.tsv'))
+                units = Command_unitCorpus._load_units(os.path.join(prefix, 'units.tsv'))
 
                 for unit in units:
                     unit_id = unit.get("unitId", None)
@@ -245,10 +246,14 @@ class Command_unitCorpus:
                     if unit_id not in unit_ID_dict:
                         unit_ID_dict[unit_id] = len(unit_ID_dict)
 
+                    unit_name = str(unit.get("name", "<UNK>")).strip() or "<UNK>"
                     unit_size = str(unit.get("unitSize", "<UNK>")).strip() or "<UNK>"
                     unit_type = str(unit.get("unitType", "<UNK>")).strip() or "<UNK>"
                     combat_power = str(unit.get("combatPower", "<UNK>")).strip() or "<UNK>"
                     location = str(unit.get("location", "<UNK>")).strip() or "<UNK>"
+
+                    if unit_name not in unit_name_dict:
+                        unit_name_dict[unit_name] = len(unit_name_dict)
 
                     if unit_size not in unit_size_dict:
                         unit_size_dict[unit_size] = len(unit_size_dict)
@@ -264,6 +269,9 @@ class Command_unitCorpus:
 
             with open(unit_ID_file, 'w', encoding='utf-8') as f:
                 json.dump(unit_ID_dict, f, ensure_ascii=False)
+
+            with open(unit_name_file, 'w', encoding='utf-8') as f:
+                json.dump(unit_name_dict, f, ensure_ascii=False)
 
             with open(unit_size_file, 'w', encoding='utf-8') as f:
                 json.dump(unit_size_dict, f, ensure_ascii=False)
@@ -522,7 +530,7 @@ class Command_unitCorpus:
             for prefix_index, prefix in enumerate([config.train_root, config.dev_root, config.test_root]):
                 mode = prefix_mode[prefix_index]
 
-                units = Command_unitCorpus._load_units(os.path.join(prefix, 'unit.tsv'))
+                units = Command_unitCorpus._load_units(os.path.join(prefix, 'units.tsv'))
                 unit_history_items = []
                 for unit in units:
                     uid = str(unit.get("unitId", "")).strip()
@@ -624,6 +632,10 @@ class Command_unitCorpus:
             self.word_dict = json.load(vocabulary_f)
             config.vocabulary_size = len(self.word_dict)
 
+        with open(os.path.join(cache_dir, 'unit_name-%s.json' % cache_dataset), 'r', encoding='utf-8') as f:
+            self.unit_name_dict = json.load(f)
+            config.unit_name_num = len(self.unit_name_dict)
+
         with open(os.path.join(cache_dir, 'unit_size-%s.json' % cache_dataset), 'r', encoding='utf-8') as f:
             self.unit_size_dict = json.load(f)
             config.unit_size_num = len(self.unit_size_dict)
@@ -679,13 +691,14 @@ class Command_unitCorpus:
         self.test_unitDataset = []                                                                        # [unit_ID, [history], [history_mask], candidate_news_ID, behavior_index]
         self.test_indices = []
 
+        self.unit_name = np.zeros([self.unit_num], dtype=np.int32)
         self.unit_size = np.zeros([self.unit_num], dtype=np.int32)
         self.unit_type = np.zeros([self.unit_num], dtype=np.int32)
         self.unit_combat_power = np.zeros([self.unit_num], dtype=np.int32)
         self.unit_location = np.zeros([self.unit_num], dtype=np.int32)
         
         for prefix in [config.train_root, config.dev_root, config.test_root]:
-            for unit in Command_unitCorpus._load_units(os.path.join(prefix, 'unit.tsv')):
+            for unit in Command_unitCorpus._load_units(os.path.join(prefix, 'units.tsv')):
                 unit_id = unit.get("unitId", None)
                 if unit_id is None:
                     continue
@@ -695,11 +708,13 @@ class Command_unitCorpus:
 
                 uidx = self.unit_ID_dict[unit_id]
 
+                unit_name = str(unit.get("name", "<UNK>")).strip() or "<UNK>"
                 unit_size = str(unit.get("unitSize", "<UNK>")).strip() or "<UNK>"
                 unit_type = str(unit.get("unitType", "<UNK>")).strip() or "<UNK>"
                 combat_power = str(unit.get("combatPower", "<UNK>")).strip() or "<UNK>"
                 location = str(unit.get("location", "<UNK>")).strip() or "<UNK>"
 
+                self.unit_name[uidx] = self.unit_name_dict.get(unit_name, 0)
                 self.unit_size[uidx] = self.unit_size_dict.get(unit_size, 0)
                 self.unit_type[uidx] = self.unit_type_dict.get(unit_type, 0)
                 self.unit_combat_power[uidx] = self.combat_power_dict.get(combat_power, 0)
@@ -839,7 +854,7 @@ class Command_unitCorpus:
             hist_index = np.zeros([self.unit_num, self.max_history_num], dtype=np.int64)
             hist_mask  = np.zeros([self.unit_num, self.max_history_num], dtype=bool)
 
-            units = Command_unitCorpus._load_units(os.path.join(root_dir, "unit.tsv"))
+            units = Command_unitCorpus._load_units(os.path.join(root_dir, "units.tsv"))
             for u in units:
                 uid = str(u.get("unitId", "")).strip()
                 if not uid:
@@ -874,7 +889,7 @@ class Command_unitCorpus:
             seq_idx = [[] for _ in range(self.unit_num)]
             seq_ts  = [[] for _ in range(self.unit_num)]
 
-            units = Command_unitCorpus._load_units(os.path.join(root_dir, "unit.tsv"))
+            units = Command_unitCorpus._load_units(os.path.join(root_dir, "units.tsv"))
             for u in units:
                 uid = str(u.get("unitId", "")).strip()
                 if not uid:
