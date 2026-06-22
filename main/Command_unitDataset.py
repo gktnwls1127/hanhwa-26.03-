@@ -87,20 +87,22 @@ class Command_Unit_Train_Dataset(data.Dataset):
         cand_location = self.unit_location[units]
         cand_unit_name = self.unit_name[units]
 
-        # cutoff_ts = int(self.corpus.train_behaviors_time_ts.get(behavior_index, 0))
-        # H = self.config.max_history_num
-        # hist_idx = np.zeros((K, H), dtype=np.int64)
-        # hist_mask = np.zeros((K, H), dtype=bool)
-        # for a, unit_idx in enumerate(units.tolist()):
-        #     hi, hm = self.corpus.get_history_before("train", int(unit_idx), cutoff_ts)
-        #     hist_idx[a] = hi
-        #     hist_mask[a] = hm
+        cutoff_ts = int(self.corpus.train_behaviors_time_ts.get(behavior_index, 0))
+        H = self.config.max_history_num
+        hist_idx = np.zeros((K, H), dtype=np.int64)
+        hist_mask = np.zeros((K, H), dtype=bool)
+        for a, unit_idx in enumerate(units.tolist()):
+            hi, hm = self.corpus.get_history_before("train", int(unit_idx), cutoff_ts)
+            hist_idx[a] = hi
+            hist_mask[a] = hm
+        '''
         hist_idx = self.unit_history_index[units].copy()   # [K, H]
         hist_mask = self.unit_history_mask[units].copy()   # [K, H]
         # 현재 커맨드는 history에서 제외
         exclude = (hist_idx == cmd_idx)
         hist_idx[exclude] = 0
         hist_mask[exclude] = False
+        '''
 
         cand_title_text = self.report_title_text[hist_idx]
         cand_title_mask = self.report_title_mask[hist_idx]
@@ -207,32 +209,28 @@ class Command_Unit_DevTest_Dataset(data.Dataset):
         cand_location = self.unit_location[candidate_unit_ID ]
         cand_unit_name = self.unit_name[candidate_unit_ID ]
 
-        # if self.mode == "dev":
-        #     cutoff_ts = int(self.corpus.dev_behaviors_time_ts.get(behavior_index, 0))
-        #     mode_str = "dev"
-        # else:
-        #     cutoff_ts = int(self.corpus.test_behaviors_time_ts.get(behavior_index, 0))
-        #     mode_str = "test"
-        # H = self.config.max_history_num
-        # K = candidate_unit_ID .shape[0]
-        # hist_idx = np.zeros((K, H), dtype=np.int64)
-        # hist_mask = np.zeros((K, H), dtype=bool)
-        # for a, unit_id in enumerate(candidate_unit_ID .tolist()):
-        #     hi, hm = self.corpus.get_history_before(mode_str, int(unit_id), cutoff_ts)
-        #     hist_idx[a] = hi
-        #     hist_mask[a] = hm
+        if self.mode == "dev":
+            cutoff_ts = int(self.corpus.dev_behaviors_time_ts.get(behavior_index, 0))
+            mode_str = "dev"
+        else:
+            cutoff_ts = int(self.corpus.test_behaviors_time_ts.get(behavior_index, 0))
+            mode_str = "test"
+        H = self.config.max_history_num
+        K = candidate_unit_ID .shape[0]
+        hist_idx = np.zeros((K, H), dtype=np.int64)
+        hist_mask = np.zeros((K, H), dtype=bool)
+        for a, unit_id in enumerate(candidate_unit_ID .tolist()):
+            hi, hm = self.corpus.get_history_before(mode_str, int(unit_id), cutoff_ts)
+            hist_idx[a] = hi
+            hist_mask[a] = hm
+        '''
         hist_idx = self.unit_history_index[candidate_unit_ID].copy()   # [K, H]
         hist_mask = self.unit_history_mask[candidate_unit_ID].copy()   # [K, H]
         # 현재 커맨드는 history에서 제외
         exclude = (hist_idx == cmd_idx)
         hist_idx[exclude] = 0
         hist_mask[exclude] = False
-
-        if self.mode == "test" and index < 20:
-            print("index:", index)
-            print("cmd_idx:", cmd_idx)
-            print("exclude sum:", exclude.sum())
-            print("positive unit position maybe from behavior:", candidate_unit_ID[:5], "...", candidate_unit_ID[-5:])
+        '''
 
         cand_title_text = self.report_title_text[hist_idx]
         cand_title_mask = self.report_title_mask[hist_idx]

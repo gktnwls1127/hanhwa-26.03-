@@ -172,6 +172,8 @@ def build_users_and_behaviors(
     users_json: Path,
     out_behaviors: Path,
     out_users: Path,
+    # 수정
+    history_viewlog_json: Path = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     cmd_df = load_command_tsv(command_tsv)
     dataid_to_time: Dict[str, str] = dict(zip(cmd_df["dataId"], cmd_df["reportTime"]))
@@ -187,18 +189,39 @@ def build_users_and_behaviors(
     # 순서 고정(중요)
     all_user_ids = [str(u.get("userId", "")).strip() for u in users]
     all_user_ids = [uid for uid in all_user_ids if uid]
-
+    
+    '''
     # viewlog 로드
     with viewlog_json.open("r", encoding="utf-8") as f:
         viewlog = json.load(f)
     if not isinstance(viewlog, list):
         raise ValueError("VIEWLOG_JSON은 list[{dataId, userIds}] 형식이어야 합니다.")
+    '''
+    # 수정
+    # behaviors 생성용 viewlog 로드
+    with viewlog_json.open("r", encoding="utf-8") as f:
+        viewlog = json.load(f)
+
+    if not isinstance(viewlog, list):
+        raise ValueError("VIEWLOG_JSON은 list[{dataId, userIds}] 형식이어야 합니다.")
+
+    # history 생성용 viewlog 로드
+    if history_viewlog_json is None:
+        history_viewlog = viewlog
+    else:
+        with history_viewlog_json.open("r", encoding="utf-8") as f:
+            history_viewlog = json.load(f)
+
+    if not isinstance(history_viewlog, list):
+        raise ValueError("history_viewlog_json은 list[{dataId, userIds}] 형식이어야 합니다.")
 
     # command별 readers set + user별 history 누적
     cmd_to_readers: Dict[str, Set[str]] = {}
     user_to_history: Dict[str, List[str]] = {uid: [] for uid in all_user_ids}
 
-    for row in viewlog:
+    # 수정
+    #for row in viewlog:
+    for row in history_viewlog:
         did = str(row.get("dataId", "")).strip()
         readers = [str(x).strip() for x in (row.get("userIds", []) or []) if str(x).strip()]
         read_set = set(readers)
@@ -421,9 +444,20 @@ def prepare_command_dataset(
 
         read_command_json_to_tsv(str(test_command_json), hanhwa_csv, str(test_command_tsv))
 
+        '''
         test_df, _ = build_users_and_behaviors(
             command_tsv=test_command_tsv,
             viewlog_json=test_viewlog_json,
+            users_json=users_json,
+            out_behaviors=test_behaviors_tsv,
+            out_users=out_users,
+        )
+        '''
+        # 수정: history_viewlog_json 추가
+        test_df, _ = build_users_and_behaviors(
+            command_tsv=test_command_tsv,
+            viewlog_json=test_viewlog_json,      # test behavior / label
+            history_viewlog_json=viewlog_json,   # train history 사용
             users_json=users_json,
             out_behaviors=test_behaviors_tsv,
             out_users=out_users,

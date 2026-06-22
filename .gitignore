@@ -1,7 +1,20 @@
+# ==========================
+# Ignore generated folders
+# ==========================
 Command-*/
 main/cache/
 main/data/
 main/test/
+main/best_model/
+main/configs/
+main/dev/
+main/models/
+main/prediction/
+main/results/
+
+# ==========================
+# Ignore binary/cache files
+# ==========================
 __pycache__/
 *.pkl
 *.pt
@@ -9,4 +22,18 @@ __pycache__/
 *.zip
 *.tar
 *.gz
+
+# Git backup
 .git_broken_backup/
+
+# ==========================
+# Ignore everything in main
+# ==========================
+main/**
+
+# Keep Python source files
+!main/
+!main/**/*.py
+
+# Keep root batch file
+!unit_test.bat

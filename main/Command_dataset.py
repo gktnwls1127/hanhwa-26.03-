@@ -93,22 +93,24 @@ class Command_Train_Dataset(data.Dataset):
         cand_unit      = self.user_unit[users]
 
         # cutoff time (현재 cmd/impression 시간) : behavior_index로 가져옴
-        # cutoff_ts = int(self.corpus.train_behaviors_time_ts.get(behavior_index, 0))
-        # H = self.config.max_history_num
-        # hist_idx  = np.zeros((K, H), dtype=np.int64)
-        # hist_mask = np.zeros((K, H), dtype=bool)
-        # # 각 후보 user에 대해 "cutoff 이전 history만" 생성
-        # for a, uid in enumerate(users.tolist()):
-        #     hi, hm = self.corpus.get_history_before('train', int(uid), cutoff_ts)
-        #     hist_idx[a]  = hi
-        #     hist_mask[a] = hm
+        cutoff_ts = int(self.corpus.train_behaviors_time_ts.get(behavior_index, 0))
+        H = self.config.max_history_num
+        hist_idx  = np.zeros((K, H), dtype=np.int64)
+        hist_mask = np.zeros((K, H), dtype=bool)
+        # 각 후보 user에 대해 "cutoff 이전 history만" 생성
+        for a, uid in enumerate(users.tolist()):
+            hi, hm = self.corpus.get_history_before('train', int(uid), cutoff_ts)
+            hist_idx[a]  = hi
+            hist_mask[a] = hm
+
+        '''
         hist_idx = self.user_history_index[users].copy()   # [K, H]
         hist_mask = self.user_history_mask[users]   # [K, H]
         # 현재 커맨드는 history에서 제외
         exclude = (hist_idx == cmd_idx)
         hist_idx[exclude] = 0
         hist_mask[exclude] = False
-
+        '''
 
         # history의 report 텍스트로 변환: [K, H, ...]
         cand_title_text   = self.report_title_text[hist_idx]
@@ -226,26 +228,29 @@ class Command_DevTest_Dataset(data.Dataset):
         # 2) user history index/mask: [K, H]
         # ----------------------------
         # cutoff time (현재 cmd/impression 시간)
-        # if self.mode == 'dev':
-        #     cutoff_ts = int(self.corpus.dev_behaviors_time_ts.get(behavior_index, 0))
-        #     mode_str = 'dev'
-        # else:
-        #     cutoff_ts = int(self.corpus.test_behaviors_time_ts.get(behavior_index, 0))
-        #     mode_str = 'test'
-        # H = self.config.max_history_num
-        # K = u.shape[0]
-        # hist_idx  = np.zeros((K, H), dtype=np.int64)
-        # hist_mask = np.zeros((K, H), dtype=bool)
-        # for a, uid in enumerate(u.tolist()):
-        #     hi, hm = self.corpus.get_history_before(mode_str, int(uid), cutoff_ts)
-        #     hist_idx[a]  = hi
-        #     hist_mask[a] = hm
+        if self.mode == 'dev':
+            cutoff_ts = int(self.corpus.dev_behaviors_time_ts.get(behavior_index, 0))
+            mode_str = 'dev'
+        else:
+            cutoff_ts = int(self.corpus.test_behaviors_time_ts.get(behavior_index, 0))
+            mode_str = 'test'
+        H = self.config.max_history_num
+        K = u.shape[0]
+        hist_idx  = np.zeros((K, H), dtype=np.int64)
+        hist_mask = np.zeros((K, H), dtype=bool)
+        for a, uid in enumerate(u.tolist()):
+            hi, hm = self.corpus.get_history_before(mode_str, int(uid), cutoff_ts)
+            hist_idx[a]  = hi
+            hist_mask[a] = hm
+
+        '''
         hist_idx = self.user_history_index[u].copy()   # [K, H]
         hist_mask = self.user_history_mask[u].copy()   # [K, H]
         # 현재 커맨드는 history에서 제외
         exclude = (hist_idx == cmd_idx)
         hist_idx[exclude] = 0
         hist_mask[exclude] = False
+        '''
 
 
         # history -> report text/mask: [K, H, ...]
